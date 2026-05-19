@@ -10,4 +10,5 @@ struct LogEntry {
     int64_t timestamp;    // Milliseconds since epoch when the log was appended
     std::string key;      // String identifier (e.g., "user:1")
     std::string value;    // The actual payload/data of the log
+    uint32_t checksum;    // Data integrity checksum
 };
