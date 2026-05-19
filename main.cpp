@@ -1,54 +1,95 @@
 #include "LogStore.h"
 #include <iostream>
+#include <thread>
+#include <chrono>
 
+/**
+ * @brief Helper function to print a single LogEntry or an error message.
+ */
 void printEntry(const std::optional<LogEntry>& entry) {
     if (entry) {
-        std::cout << "Read Log - Offset: " << entry->offset 
-                  << ", Timestamp: " << entry->timestamp 
-                  << ", Key: " << entry->key 
-                  << ", Value: " << entry->value << std::endl;
+        std::cout << "[Offset: " << entry->offset 
+                  << " | TS: " << entry->timestamp 
+                  << "] " << entry->key 
+                  << " -> " << entry->value << std::endl;
     } else {
         std::cout << "Log entry not found." << std::endl;
+    }
+}
+
+/**
+ * @brief Helper function to print a list of LogEntries.
+ */
+void printEntries(const std::vector<LogEntry>& entries) {
+    if (entries.empty()) {
+        std::cout << "  No entries found." << std::endl;
+    } else {
+        for (const auto& entry : entries) {
+            std::cout << "  ";
+            printEntry(entry);
+        }
     }
 }
 
 int main() {
     std::string log_file = "test_log.bin";
     
-    // Write and Read Phase
+    // Delete existing test file so we start fresh for the demo
+    std::remove(log_file.c_str());
+
+    int64_t t1, t2;
+
+    // --- BLOCK 1: Simulate the Database starting up and running ---
     {
-        std::cout << "--- Initializing LogStore ---" << std::endl;
+        std::cout << "--- Phase 1: Appending Logs ---" << std::endl;
         LogStore store(log_file);
 
-        std::cout << "\nAppending logs..." << std::endl;
-        uint64_t offset1 = store.append("user:1", "alice");
-        uint64_t offset2 = store.append("user:2", "bob");
-        uint64_t offset3 = store.append("user:3", "charlie");
+        store.append("user:1", "login");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        // Capture time T1 for range querying
+        t1 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         
-        std::cout << "Appended at offsets: " << offset1 << ", " << offset2 << ", " << offset3 << std::endl;
+        store.append("user:2", "login");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        
+        store.append("user:1", "view_page");
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        
+        // Capture time T2 for range querying
+        t2 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        
+        store.append("user:3", "login");
+        
+        std::cout << "Appended 4 logs." << std::endl;
 
-        std::cout << "\nReading logs..." << std::endl;
-        printEntry(store.read(offset1));
-        printEntry(store.read(offset2));
-        printEntry(store.read(offset3));
-        printEntry(store.read(999)); // Should not be found
-    }
+        std::cout << "\n--- Phase 2: Querying Indexes ---" << std::endl;
+        
+        std::cout << "\nSearch by Key 'user:1':" << std::endl;
+        printEntries(store.searchByKey("user:1"));
 
-    // Recovery Phase
+        std::cout << "\nSearch by Key 'user:999':" << std::endl;
+        printEntries(store.searchByKey("user:999"));
+
+        std::cout << "\nSearch by Timestamp Range (" << t1 << " to " << t2 << "):" << std::endl;
+        printEntries(store.searchByTimestampRange(t1, t2));
+    } // <-- The store object is destroyed here. The file is closed and memory is wiped.
+
+    // --- BLOCK 2: Simulate a Server Crash and Restart ---
     {
-        std::cout << "\n--- Reopening LogStore to test recovery ---" << std::endl;
-        LogStore store(log_file); // This will call recover()
+        std::cout << "\n--- Phase 3: Recovery ---" << std::endl;
         
-        std::cout << "\nReading previously written logs..." << std::endl;
-        printEntry(store.read(0));
-        printEntry(store.read(1));
-        printEntry(store.read(2));
+        // This brand new object automatically calls recover() in its constructor!
+        LogStore store(log_file); 
         
-        std::cout << "\nAppending new log after recovery..." << std::endl;
-        uint64_t offset4 = store.append("user:4", "diana");
-        std::cout << "Appended at offset: " << offset4 << std::endl;
+        std::cout << "\nAfter recovery, searching by Key 'user:2':" << std::endl;
+        printEntries(store.searchByKey("user:2"));
         
-        printEntry(store.read(offset4));
+        std::cout << "\nAppending a new log to ensure indexing continues..." << std::endl;
+        store.append("user:1", "logout");
+        
+        std::cout << "\nSearch by Key 'user:1' now shows:" << std::endl;
+        printEntries(store.searchByKey("user:1"));
     }
 
     return 0;
