@@ -1,0 +1,13 @@
+Ah, you are currently inside the `build` folder! 
+
+Since I set the `.gitignore` to completely ignore the `build` folder, running `git add .` while inside it will do nothing (because Git is actively ignoring everything in your current directory).
+
+You just need to go up one level to your main project folder first!
+
+Run this:
+cd ..
+
+And then try the commit commands again:
+git add .
+git commit -m "Part 4: gRPC and Protocol Buffers Implementation" -m "Upgraded LogForge into a distributed networked service. Defined the API schema in logforge.proto and wrapped the core LogStore engine inside a gRPC server running on port 50051. Overhauled the build system to use CMake for automated protobuf code generation and target compilation."
+git push

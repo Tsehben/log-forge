@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package logforge;
+
+service LogForgeService {
+  rpc AppendLog (AppendRequest) returns (AppendResponse) {}
+  rpc GetLog (GetLogRequest) returns (LogEntry) {}
+  rpc SearchByKey (SearchKeyRequest) returns (SearchResponse) {}
+  rpc SearchByTimestampRange (SearchTimestampRequest) returns (SearchResponse) {}
+}
+
+message AppendRequest {
+  string key = 1;
+  string value = 2;
+}
+
+message AppendResponse {
+  uint64 offset = 1;
+  int64 timestamp = 2;
+}
+
+message GetLogRequest {
+  uint64 offset = 1;
+}
+
+message SearchKeyRequest {
+  string key = 1;
+}
+
+message SearchTimestampRequest {
+  int64 start_timestamp = 1;
+  int64 end_timestamp = 2;
+}
+
+message LogEntry {
+  uint64 offset = 1;
+  int64 timestamp = 2;
+  string key = 3;
+  string value = 4;
+}
+
+message SearchResponse {
+  repeated LogEntry entries = 1;
+}

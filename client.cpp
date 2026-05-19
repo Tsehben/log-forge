@@ -1,0 +1,132 @@
+#include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
+#include <chrono>
+
+#include <grpcpp/grpcpp.h>
+#include "logforge.grpc.pb.h"
+
+using grpc::Channel;
+using grpc::ClientContext;
+using grpc::Status;
+using logforge::LogForgeService;
+using logforge::AppendRequest;
+using logforge::AppendResponse;
+using logforge::GetLogRequest;
+using logforge::SearchKeyRequest;
+using logforge::SearchTimestampRequest;
+using logforge::LogEntry;
+using logforge::SearchResponse;
+
+class LogForgeClient {
+public:
+    LogForgeClient(std::shared_ptr<Channel> channel)
+        : stub_(LogForgeService::NewStub(channel)) {}
+
+    void AppendLog(const std::string& key, const std::string& value) {
+        AppendRequest request;
+        request.set_key(key);
+        request.set_value(value);
+
+        AppendResponse reply;
+        ClientContext context;
+
+        Status status = stub_->AppendLog(&context, request, &reply);
+
+        if (status.ok()) {
+            std::cout << "Successfully Appended! -> Offset: " << reply.offset() 
+                      << ", Timestamp: " << reply.timestamp() << std::endl;
+        } else {
+            std::cout << "AppendLog failed: " << status.error_message() << std::endl;
+        }
+    }
+
+    void GetLog(uint64_t offset) {
+        GetLogRequest request;
+        request.set_offset(offset);
+
+        LogEntry reply;
+        ClientContext context;
+
+        Status status = stub_->GetLog(&context, request, &reply);
+
+        if (status.ok()) {
+            std::cout << "Found Log: [Offset " << reply.offset() << "] " 
+                      << reply.key() << " -> " << reply.value() << std::endl;
+        } else {
+            std::cout << "GetLog failed (" << offset << "): " << status.error_message() << std::endl;
+        }
+    }
+
+    void SearchByKey(const std::string& key) {
+        SearchKeyRequest request;
+        request.set_key(key);
+
+        SearchResponse reply;
+        ClientContext context;
+
+        Status status = stub_->SearchByKey(&context, request, &reply);
+
+        if (status.ok()) {
+            std::cout << "Search By Key '" << key << "' found " << reply.entries_size() << " entries:" << std::endl;
+            for (const auto& entry : reply.entries()) {
+                std::cout << "  - [Offset " << entry.offset() << "] " << entry.value() << std::endl;
+            }
+        } else {
+            std::cout << "SearchByKey failed: " << status.error_message() << std::endl;
+        }
+    }
+
+    void SearchByTimestampRange(int64_t start, int64_t end) {
+        SearchTimestampRequest request;
+        request.set_start_timestamp(start);
+        request.set_end_timestamp(end);
+
+        SearchResponse reply;
+        ClientContext context;
+
+        Status status = stub_->SearchByTimestampRange(&context, request, &reply);
+
+        if (status.ok()) {
+            std::cout << "Search By Timestamp found " << reply.entries_size() << " entries." << std::endl;
+            for (const auto& entry : reply.entries()) {
+                std::cout << "  - [Offset " << entry.offset() << "] " << entry.key() << " -> " << entry.value() << std::endl;
+            }
+        } else {
+            std::cout << "SearchByTimestampRange failed: " << status.error_message() << std::endl;
+        }
+    }
+
+private:
+    std::unique_ptr<LogForgeService::Stub> stub_;
+};
+
+int main(int argc, char** argv) {
+    LogForgeClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
+
+    std::cout << "--- Sending Append Requests ---" << std::endl;
+    client.AppendLog("system", "startup");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    int64_t t1 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    client.AppendLog("auth", "user1_login");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    client.AppendLog("auth", "user2_login");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    int64_t t2 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    
+    client.AppendLog("system", "shutdown");
+
+    std::cout << "\n--- Fetching Logs Directly ---" << std::endl;
+    client.GetLog(0); // system startup
+    client.GetLog(999); // Will intentionally fail with NOT_FOUND
+
+    std::cout << "\n--- Searching Logs By Key ---" << std::endl;
+    client.SearchByKey("auth");
+
+    std::cout << "\n--- Searching Logs By Timestamp Range ---" << std::endl;
+    client.SearchByTimestampRange(t1, t2);
+
+    return 0;
+}
