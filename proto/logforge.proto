@@ -8,6 +8,8 @@ service LogForgeService {
   rpc SearchByKey (SearchKeyRequest) returns (SearchResponse) {}
   rpc SearchByTimestampRange (SearchTimestampRequest) returns (SearchResponse) {}
   rpc ReplicateLog (ReplicateRequest) returns (ReplicateResponse) {}
+  rpc CompactLog (CompactLogRequest) returns (CompactLogResponse) {}
+  rpc CompactReplica (CompactReplicaRequest) returns (CompactReplicaResponse) {}
 }
 
 message AppendRequest {
@@ -52,5 +54,19 @@ message ReplicateRequest {
 }
 
 message ReplicateResponse {
+  bool success = 1;
+}
+
+message CompactLogRequest {}
+
+message CompactLogResponse {
+  bool success = 1;
+  uint64 entries_before = 2;
+  uint64 entries_after = 3;
+}
+
+message CompactReplicaRequest {}
+
+message CompactReplicaResponse {
   bool success = 1;
 }

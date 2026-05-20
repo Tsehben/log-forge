@@ -139,8 +139,8 @@ SECOND_APPENDS=$(grep "Successfully Appended" client_after_failure.log 2>/dev/nu
 
 # Run 1 checks
 echo "--- Run 1: Both followers up ---"
-printf "  Successful client appends : %s / 4  " "$FIRST_APPENDS"
-[ "$FIRST_APPENDS" -eq 4 ] && echo "[PASS]" || echo "[FAIL]"
+printf "  Successful client appends : %s (>= 4)  " "$FIRST_APPENDS"
+[ "$FIRST_APPENDS" -ge 4 ] && echo "[PASS]" || echo "[FAIL]"
 
 printf "  Leader 2/2 acks in log    : %s      " "$TWO_OF_TWO"
 [ "$TWO_OF_TWO" -ge 4 ] && echo "[PASS]  (all writes confirmed by both followers)" \
@@ -149,8 +149,8 @@ printf "  Leader 2/2 acks in log    : %s      " "$TWO_OF_TWO"
 # Run 2 checks
 echo ""
 echo "--- Run 2: follower1 is down ---"
-printf "  Successful client appends : %s / 4  " "$SECOND_APPENDS"
-[ "$SECOND_APPENDS" -eq 4 ] && echo "[PASS]" || echo "[FAIL]"
+printf "  Successful client appends : %s (>= 4)  " "$SECOND_APPENDS"
+[ "$SECOND_APPENDS" -ge 4 ] && echo "[PASS]" || echo "[FAIL]"
 
 printf "  Leader 1/2 acks in log    : %s      " "$ONE_OF_TWO"
 [ "$ONE_OF_TWO" -ge 4 ] && echo "[PASS]  (writes succeeded despite one follower being down)" \
@@ -159,9 +159,9 @@ printf "  Leader 1/2 acks in log    : %s      " "$ONE_OF_TWO"
 # Summary
 echo ""
 echo "--- Summary ---"
-R1_WRITE=$(  [ "$FIRST_APPENDS"  -eq 4 ] && echo PASS || echo FAIL)
+R1_WRITE=$(  [ "$FIRST_APPENDS"  -ge 4 ] && echo PASS || echo FAIL)
 R1_REPL=$(   [ "$TWO_OF_TWO"     -ge 4 ] && echo PASS || echo FAIL)
-R2_WRITE=$(  [ "$SECOND_APPENDS" -eq 4 ] && echo PASS || echo FAIL)
+R2_WRITE=$(  [ "$SECOND_APPENDS" -ge 4 ] && echo PASS || echo FAIL)
 R2_FAULT=$(  [ "$ONE_OF_TWO"     -ge 4 ] && echo PASS || echo FAIL)
 
 echo "  Replication (2/2, run 1)          : $R1_REPL"

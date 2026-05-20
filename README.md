@@ -7,9 +7,10 @@ A C++ append-only distributed log storage engine with gRPC API and leader/follow
 | Component | Description |
 |-----------|-------------|
 | **LogStore** | Append-only binary log with FNV-1a checksums and crash recovery |
-| **gRPC API** | `AppendLog`, `GetLog`, `SearchByKey`, `SearchByTimestampRange`, `ReplicateLog` |
+| **gRPC API** | `AppendLog`, `GetLog`, `SearchByKey`, `SearchByTimestampRange`, `ReplicateLog`, `CompactLog`, `CompactReplica` |
 | **Replication** | Fixed leader/follower — leader persists and fans out each write to two followers |
 | **Fault Tolerance** | Writes succeed if leader + ≥1 follower durably persists the entry (2-of-3 durability) |
+| **Compaction** | `CompactLog` keeps only the latest entry per key, rewrites with new sequential offsets, atomically replaces the log file, and fans the operation out to all followers via `CompactReplica` |
 
 ---
 

@@ -28,6 +28,12 @@ public:
     // Scans log file to rebuild indexes and truncates corrupted trailing data
     void recover();
 
+    // Rewrites the log keeping only the latest entry per key, then rebuilds indexes
+    void compact();
+
+    // Returns the current number of entries in the store
+    uint64_t size() const;
+
     // Helper function to simulate a crash corruption
     void simulateCorruption();
 

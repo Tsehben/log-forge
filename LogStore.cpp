@@ -270,6 +270,77 @@ void LogStore::recover() {
     file_.clear();
 }
 
+void LogStore::compact() {
+    if (!file_.is_open()) return;
+
+    // Step 1: Collect the latest offset for each key
+    std::vector<uint64_t> keep_offsets;
+    keep_offsets.reserve(key_index_.size());
+    for (const auto& [key, offsets] : key_index_) {
+        if (!offsets.empty()) {
+            keep_offsets.push_back(offsets.back());
+        }
+    }
+
+    if (keep_offsets.empty()) return;
+
+    // Sort to preserve chronological insertion order
+    std::sort(keep_offsets.begin(), keep_offsets.end());
+
+    // Step 2: Read the entries to keep (before closing the file)
+    std::vector<LogEntry> entries;
+    entries.reserve(keep_offsets.size());
+    for (uint64_t off : keep_offsets) {
+        auto e = read(off);
+        if (e) entries.push_back(std::move(*e));
+    }
+
+    // Step 3: Write compacted data to a temp file with new sequential offsets
+    std::string temp_path = filepath_ + ".tmp";
+    {
+        std::ofstream temp(temp_path, std::ios::binary | std::ios::trunc);
+        if (!temp) {
+            std::cerr << "[ERROR] compact: cannot open temp file: " << temp_path << std::endl;
+            return;
+        }
+        uint64_t new_offset = 0;
+        for (auto& e : entries) {
+            e.offset = new_offset++;
+            uint32_t ksz = static_cast<uint32_t>(e.key.size());
+            uint32_t vsz = static_cast<uint32_t>(e.value.size());
+            uint32_t chk = calculateChecksum(e.offset, e.timestamp, e.key, e.value);
+            temp.write(reinterpret_cast<const char*>(&e.offset),    sizeof(e.offset));
+            temp.write(reinterpret_cast<const char*>(&e.timestamp), sizeof(e.timestamp));
+            temp.write(reinterpret_cast<const char*>(&ksz),         sizeof(ksz));
+            if (ksz > 0) temp.write(e.key.data(), ksz);
+            temp.write(reinterpret_cast<const char*>(&vsz),         sizeof(vsz));
+            if (vsz > 0) temp.write(e.value.data(), vsz);
+            temp.write(reinterpret_cast<const char*>(&chk),         sizeof(chk));
+        }
+        temp.flush();
+    } // temp closes here
+
+    // Step 4: Close current file and atomically replace it
+    file_.close();
+    try {
+        std::filesystem::rename(temp_path, filepath_);
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] compact: rename failed: " << e.what() << std::endl;
+        file_.open(filepath_, std::ios::in | std::ios::out | std::ios::app | std::ios::binary);
+        return;
+    }
+
+    // Step 5: Reopen and rebuild all indexes
+    file_.open(filepath_, std::ios::in | std::ios::out | std::ios::app | std::ios::binary);
+    recover();
+
+    std::cout << "[INFO] Compaction complete. Entries kept: " << entries.size() << std::endl;
+}
+
+uint64_t LogStore::size() const {
+    return static_cast<uint64_t>(offset_index_.size());
+}
+
 void LogStore::simulateCorruption() {
     file_.clear();
     file_.seekp(0, std::ios::end);

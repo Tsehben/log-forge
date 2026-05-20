@@ -18,6 +18,8 @@ using logforge::SearchKeyRequest;
 using logforge::SearchTimestampRequest;
 using logforge::LogEntry;
 using logforge::SearchResponse;
+using logforge::CompactLogRequest;
+using logforge::CompactLogResponse;
 
 class LogForgeClient {
 public:
@@ -98,6 +100,22 @@ public:
         }
     }
 
+    void CompactLog() {
+        CompactLogRequest request;
+        CompactLogResponse reply;
+        ClientContext context;
+
+        Status status = stub_->CompactLog(&context, request, &reply);
+
+        if (status.ok()) {
+            std::cout << "CompactLog: success=" << (reply.success() ? "true" : "false")
+                      << ", entries_before=" << reply.entries_before()
+                      << ", entries_after=" << reply.entries_after() << std::endl;
+        } else {
+            std::cout << "CompactLog failed: " << status.error_message() << std::endl;
+        }
+    }
+
 private:
     std::unique_ptr<LogForgeService::Stub> stub_;
 };
@@ -135,6 +153,28 @@ int main(int argc, char** argv) {
 
     std::cout << "\n--- Searching Logs By Timestamp Range ---" << std::endl;
     client.SearchByTimestampRange(t1, t2);
+
+    std::cout << "\n--- Compaction Demo ---" << std::endl;
+    std::cout << "Appending entries with repeated keys..." << std::endl;
+    client.AppendLog("config", "v1");
+    client.AppendLog("config", "v2");
+    client.AppendLog("config", "v3");
+    client.AppendLog("user",   "alice");
+    client.AppendLog("user",   "bob");
+    client.AppendLog("user",   "charlie");
+
+    std::cout << "\n--- Before Compaction ---" << std::endl;
+    client.SearchByKey("config");
+    client.SearchByKey("user");
+    client.SearchByKey("auth");
+
+    std::cout << "\n--- Running CompactLog ---" << std::endl;
+    client.CompactLog();
+
+    std::cout << "\n--- After Compaction (latest entry per key only) ---" << std::endl;
+    client.SearchByKey("config");
+    client.SearchByKey("user");
+    client.SearchByKey("auth");
 
     return 0;
 }

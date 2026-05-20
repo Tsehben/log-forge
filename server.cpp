@@ -25,6 +25,10 @@ using logforge::SearchTimestampRequest;
 using logforge::SearchResponse;
 using logforge::ReplicateRequest;
 using logforge::ReplicateResponse;
+using logforge::CompactLogRequest;
+using logforge::CompactLogResponse;
+using logforge::CompactReplicaRequest;
+using logforge::CompactReplicaResponse;
 
 class LogForgeServiceImpl final : public LogForgeService::Service {
     LogStore store_;
@@ -134,6 +138,45 @@ public:
             proto_entry->set_key(e.key);
             proto_entry->set_value(e.value);
         }
+        return Status::OK;
+    }
+
+    Status CompactLog(ServerContext* context, const CompactLogRequest* request, CompactLogResponse* reply) override {
+        if (role_ != "leader") {
+            return Status(grpc::StatusCode::PERMISSION_DENIED, "Only the leader can accept CompactLog requests.");
+        }
+
+        uint64_t before = store_.size();
+        store_.compact();
+        uint64_t after = store_.size();
+
+        for (auto& pair : followers_) {
+            CompactReplicaRequest rep_req;
+            CompactReplicaResponse rep_reply;
+            ClientContext cli_context;
+            cli_context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+            Status status = pair.second->CompactReplica(&cli_context, rep_req, &rep_reply);
+            if (status.ok() && rep_reply.success()) {
+                std::cout << "Compacted follower " << pair.first << std::endl;
+            } else {
+                std::cerr << "[WARNING] Failed to compact follower " << pair.first << std::endl;
+            }
+        }
+
+        reply->set_success(true);
+        reply->set_entries_before(before);
+        reply->set_entries_after(after);
+        std::cout << "CompactLog: " << before << " -> " << after << " entries." << std::endl;
+        return Status::OK;
+    }
+
+    Status CompactReplica(ServerContext* context, const CompactReplicaRequest* request, CompactReplicaResponse* reply) override {
+        if (role_ == "leader") {
+            return Status(grpc::StatusCode::INVALID_ARGUMENT, "Leader should not receive CompactReplica requests.");
+        }
+        store_.compact();
+        reply->set_success(true);
+        std::cout << "CompactReplica: local log compacted." << std::endl;
         return Status::OK;
     }
 
