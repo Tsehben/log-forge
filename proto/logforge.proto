@@ -7,6 +7,7 @@ service LogForgeService {
   rpc GetLog (GetLogRequest) returns (LogEntry) {}
   rpc SearchByKey (SearchKeyRequest) returns (SearchResponse) {}
   rpc SearchByTimestampRange (SearchTimestampRequest) returns (SearchResponse) {}
+  rpc ReplicateLog (ReplicateRequest) returns (ReplicateResponse) {}
 }
 
 message AppendRequest {
@@ -41,4 +42,15 @@ message LogEntry {
 
 message SearchResponse {
   repeated LogEntry entries = 1;
+}
+
+message ReplicateRequest {
+  uint64 offset = 1;
+  int64 timestamp = 2;
+  string key = 3;
+  string value = 4;
+}
+
+message ReplicateResponse {
+  bool success = 1;
 }

@@ -103,7 +103,15 @@ private:
 };
 
 int main(int argc, char** argv) {
-    LogForgeClient client(grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials()));
+    std::string target_str = "localhost:5001";
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.find("--target=") == 0) {
+            target_str = arg.substr(9);
+        }
+    }
+
+    LogForgeClient client(grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
 
     std::cout << "--- Sending Append Requests ---" << std::endl;
     client.AppendLog("system", "startup");

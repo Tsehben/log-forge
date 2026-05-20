@@ -1,6 +1,9 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <vector>
+#include <sstream>
+#include <filesystem>
 
 #include <grpcpp/grpcpp.h>
 #include "logforge.grpc.pb.h"
@@ -10,6 +13,9 @@ using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
+using grpc::Channel;
+using grpc::ClientContext;
+
 using logforge::LogForgeService;
 using logforge::AppendRequest;
 using logforge::AppendResponse;
@@ -17,27 +23,94 @@ using logforge::GetLogRequest;
 using logforge::SearchKeyRequest;
 using logforge::SearchTimestampRequest;
 using logforge::SearchResponse;
+using logforge::ReplicateRequest;
+using logforge::ReplicateResponse;
 
 class LogForgeServiceImpl final : public LogForgeService::Service {
     LogStore store_;
+    std::string role_;
+    std::vector<std::pair<std::string, std::unique_ptr<LogForgeService::Stub>>> followers_;
 
 public:
-    LogForgeServiceImpl(const std::string& filepath) : store_(filepath) {}
+    LogForgeServiceImpl(const std::string& filepath, const std::string& role, const std::vector<std::string>& peers)
+        : store_(filepath), role_(role) {
+        if (role_ == "leader") {
+            for (const auto& peer : peers) {
+                if (!peer.empty()) {
+                    auto channel = grpc::CreateChannel(peer, grpc::InsecureChannelCredentials());
+                    followers_.push_back({peer, LogForgeService::NewStub(channel)});
+                }
+            }
+        }
+    }
 
     Status AppendLog(ServerContext* context, const AppendRequest* request, AppendResponse* reply) override {
+        if (role_ != "leader") {
+            return Status(grpc::StatusCode::PERMISSION_DENIED, "Only the leader can accept AppendLog requests.");
+        }
+
         uint64_t offset = store_.append(request->key(), request->value());
         if (offset == static_cast<uint64_t>(-1)) {
-            return Status(grpc::StatusCode::INTERNAL, "Failed to append log to disk");
+            return Status(grpc::StatusCode::INTERNAL, "Failed to append log to leader disk");
         }
         
-        // Read the entry back to fetch its server-generated timestamp
         auto entry = store_.read(offset);
-        if (entry) {
+        if (!entry) {
+            return Status(grpc::StatusCode::INTERNAL, "Failed to verify appended log on leader");
+        }
+
+        // Replicate to followers
+        int success_count = 0;
+        for (auto& pair : followers_) {
+            const std::string& peer_addr = pair.first;
+            auto& stub = pair.second;
+
+            ReplicateRequest rep_req;
+            rep_req.set_offset(entry->offset);
+            rep_req.set_timestamp(entry->timestamp);
+            rep_req.set_key(entry->key);
+            rep_req.set_value(entry->value);
+
+            ReplicateResponse rep_reply;
+            ClientContext cli_context;
+            // Short deadline for replication so leader doesn't hang if a follower is down
+            cli_context.set_deadline(std::chrono::system_clock::now() + std::chrono::milliseconds(500));
+
+            Status status = stub->ReplicateLog(&cli_context, rep_req, &rep_reply);
+            if (status.ok() && rep_reply.success()) {
+                success_count++;
+                std::cout << "Replicated to follower " << peer_addr << std::endl;
+            } else {
+                std::cerr << "[WARNING] Failed to replicate offset " << entry->offset << " to " << peer_addr << std::endl;
+            }
+        }
+
+        std::cout << "Replication acknowledgments: " << success_count << "/" << followers_.size() << std::endl;
+
+        // Return success if leader + at least 1 follower (majority of 3) has the data.
+        if (followers_.empty() || success_count >= 1) {
             reply->set_offset(entry->offset);
             reply->set_timestamp(entry->timestamp);
             return Status::OK;
+        } else {
+            return Status(grpc::StatusCode::INTERNAL, "Failed to replicate log to a quorum.");
         }
-        return Status(grpc::StatusCode::INTERNAL, "Failed to verify appended log");
+    }
+
+    Status ReplicateLog(ServerContext* context, const ReplicateRequest* request, ReplicateResponse* reply) override {
+        if (role_ == "leader") {
+            return Status(grpc::StatusCode::INVALID_ARGUMENT, "Leader should not receive ReplicateLog requests.");
+        }
+
+        bool success = store_.replicate(request->offset(), request->timestamp(), request->key(), request->value());
+        reply->set_success(success);
+        
+        if (success) {
+            std::cout << "Successfully replicated offset " << request->offset() << " from leader." << std::endl;
+            return Status::OK;
+        } else {
+            return Status(grpc::StatusCode::INTERNAL, "Follower failed to replicate log to disk.");
+        }
     }
 
     Status GetLog(ServerContext* context, const GetLogRequest* request, logforge::LogEntry* reply) override {
@@ -77,26 +150,50 @@ public:
     }
 };
 
-void RunServer() {
-    std::string server_address("0.0.0.0:50051");
-    // Start the LogStore, it will automatically recover on startup
-    LogForgeServiceImpl service("server_log.bin");
+int main(int argc, char** argv) {
+    std::cout << std::unitbuf;
+    std::string role = "leader";
+    std::string port = "50051";
+    std::string data_dir = "./data/leader";
+    std::vector<std::string> peers;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.find("--role=") == 0) {
+            role = arg.substr(7);
+        } else if (arg.find("--port=") == 0) {
+            port = arg.substr(7);
+        } else if (arg.find("--data=") == 0) {
+            data_dir = arg.substr(7);
+        } else if (arg.find("--peers=") == 0) {
+            std::string peers_str = arg.substr(8);
+            std::stringstream ss(peers_str);
+            std::string peer;
+            while (std::getline(ss, peer, ',')) {
+                peers.push_back(peer);
+            }
+        }
+    }
+
+    try {
+        std::filesystem::create_directories(data_dir);
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to create data directory: " << e.what() << std::endl;
+        return 1;
+    }
+
+    std::string filepath = data_dir + "/server_log.bin";
+    std::string server_address = "0.0.0.0:" + port;
+
+    LogForgeServiceImpl service(filepath, role, peers);
 
     ServerBuilder builder;
-    // Listen on the given address without any authentication mechanism.
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    // Register "service" as the instance through which we'll communicate with clients.
     builder.RegisterService(&service);
     
-    // Finally assemble the server.
     std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "LogForge gRPC Server listening on " << server_address << std::endl;
-    
-    // Wait for the server to shutdown.
+    std::cout << "[LogForge " << role << "] Server listening on " << server_address << " | Data: " << filepath << std::endl;
     server->Wait();
-}
 
-int main(int argc, char** argv) {
-    RunServer();
     return 0;
 }

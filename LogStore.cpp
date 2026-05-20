@@ -80,6 +80,43 @@ uint64_t LogStore::append(const std::string& key, const std::string& value) {
     return offset;
 }
 
+bool LogStore::replicate(uint64_t offset, int64_t timestamp, const std::string& key, const std::string& value) {
+    if (!file_.is_open()) return false;
+    
+    // Ensure strict sequential consistency
+    if (offset != next_offset_) {
+        std::cerr << "[ERROR] Replication offset mismatch. Expected " << next_offset_ << ", got " << offset << std::endl;
+        return false;
+    }
+
+    uint32_t key_size = static_cast<uint32_t>(key.size());
+    uint32_t value_size = static_cast<uint32_t>(value.size());
+    
+    uint32_t checksum = calculateChecksum(offset, timestamp, key, value);
+
+    file_.seekp(0, std::ios::end);
+    std::streampos current_pos = file_.tellp();
+
+    file_.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
+    file_.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
+    file_.write(reinterpret_cast<const char*>(&key_size), sizeof(key_size));
+    if (key_size > 0) file_.write(key.data(), key_size);
+    
+    file_.write(reinterpret_cast<const char*>(&value_size), sizeof(value_size));
+    if (value_size > 0) file_.write(value.data(), value_size);
+    
+    file_.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
+    
+    file_.flush();
+
+    offset_index_[offset] = current_pos;
+    key_index_[key].push_back(offset);
+    timestamp_index_.insert({timestamp, offset});
+    next_offset_++;
+
+    return true;
+}
+
 std::optional<LogEntry> LogStore::read(uint64_t offset) {
     auto it = offset_index_.find(offset);
     if (it == offset_index_.end() || !file_.is_open()) {

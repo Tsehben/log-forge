@@ -20,6 +20,7 @@ public:
     LogStore& operator=(const LogStore&) = delete;
 
     uint64_t append(const std::string& key, const std::string& value);
+    bool replicate(uint64_t offset, int64_t timestamp, const std::string& key, const std::string& value);
     std::optional<LogEntry> read(uint64_t offset);
     std::vector<LogEntry> searchByKey(const std::string& key);
     std::vector<LogEntry> searchByTimestampRange(int64_t startTimestamp, int64_t endTimestamp);
