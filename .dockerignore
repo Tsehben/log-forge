@@ -1,0 +1,5 @@
+build/
+.git/
+*.bin
+test_log.bin
+.DS_Store

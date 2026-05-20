@@ -1,0 +1,37 @@
+services:
+
+  follower1:
+    build: .
+    command: /app/build/logforge_server --role=follower --port=5002 --data=/data/follower1
+    volumes:
+      - follower1_data:/data
+
+  follower2:
+    build: .
+    command: /app/build/logforge_server --role=follower --port=5003 --data=/data/follower2
+    volumes:
+      - follower2_data:/data
+
+  leader:
+    build: .
+    command: /app/build/logforge_server --role=leader --port=5001 --data=/data/leader --peers=follower1:5002,follower2:5003
+    ports:
+      - "5001:5001"
+    depends_on:
+      - follower1
+      - follower2
+    volumes:
+      - leader_data:/data
+
+  client:
+    build: .
+    command: /app/build/logforge_client --target=leader:5001
+    depends_on:
+      - leader
+    profiles:
+      - demo
+
+volumes:
+  leader_data:
+  follower1_data:
+  follower2_data:

@@ -4,9 +4,9 @@ project(LogForge VERSION 1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find Protobuf and gRPC installed via Homebrew
-# Using CONFIG for Protobuf prevents Homebrew conflicts with gRPC
-find_package(Protobuf CONFIG REQUIRED)
+# Protobuf: module mode works with both apt (Debian/Ubuntu) and Homebrew (macOS)
+# gRPC: CONFIG mode required — both apt and Homebrew ship gRPCConfig.cmake
+find_package(Protobuf REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 
 # Setup proto file
