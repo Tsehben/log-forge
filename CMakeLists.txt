@@ -13,6 +13,8 @@ if(NOT Protobuf_FOUND)
 endif()
 # gRPC: CONFIG mode required — both apt and Homebrew ship gRPCConfig.cmake
 find_package(gRPC CONFIG REQUIRED)
+# ZLIB: built-in CMake module — available on macOS (system/Homebrew) and Debian (zlib1g-dev)
+find_package(ZLIB REQUIRED)
 
 # Setup proto file
 set(PROTO_FILE "proto/logforge.proto")
@@ -52,6 +54,7 @@ target_link_libraries(logforge_proto PUBLIC gRPC::grpc++ protobuf::libprotobuf)
 
 # The core LogStore library
 add_library(logstore LogStore.cpp)
+target_link_libraries(logstore PUBLIC ZLIB::ZLIB)
 
 # The Server Executable
 add_executable(logforge_server server.cpp)

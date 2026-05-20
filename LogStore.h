@@ -13,7 +13,7 @@
  */
 class LogStore {
 public:
-    explicit LogStore(const std::string& filepath);
+    explicit LogStore(const std::string& filepath, bool compression = false);
     ~LogStore();
 
     LogStore(const LogStore&) = delete;
@@ -37,15 +37,22 @@ public:
     // Helper function to simulate a crash corruption
     void simulateCorruption();
 
+    static constexpr uint8_t FLAG_COMPRESSED = 0x01;
+
 private:
     std::string filepath_;
     std::fstream file_;
     uint64_t next_offset_;
+    bool compression_;
     
     std::unordered_map<uint64_t, std::streampos> offset_index_;
     std::unordered_map<std::string, std::vector<uint64_t>> key_index_;
     std::multimap<int64_t, uint64_t> timestamp_index_;
 
-    // Helper to calculate FNV-1a checksum for an entry
+    // Helper to calculate FNV-1a checksum for an entry (always on uncompressed value)
     uint32_t calculateChecksum(uint64_t offset, int64_t timestamp, const std::string& key, const std::string& value);
+    // Compress value bytes using zlib; prefixes 4-byte original size for decompression
+    std::string compressValue(const std::string& data) const;
+    // Decompress zlib bytes written by compressValue
+    std::string decompressValue(const std::string& data) const;
 };

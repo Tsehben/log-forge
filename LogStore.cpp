@@ -2,9 +2,12 @@
 #include <chrono>
 #include <iostream>
 #include <filesystem>
+#include <cstring>
+#include <algorithm>
+#include <zlib.h>
 
-LogStore::LogStore(const std::string& filepath)
-    : filepath_(filepath), next_offset_(0) {
+LogStore::LogStore(const std::string& filepath, bool compression)
+    : filepath_(filepath), next_offset_(0), compression_(compression) {
     file_.open(filepath_, std::ios::in | std::ios::out | std::ios::app | std::ios::binary);
     
     if (!file_.is_open()) {
@@ -41,6 +44,54 @@ uint32_t LogStore::calculateChecksum(uint64_t offset, int64_t timestamp, const s
     return hash;
 }
 
+std::string LogStore::compressValue(const std::string& data) const {
+    uLongf compressed_max = compressBound(static_cast<uLong>(data.size()));
+    std::string result(4 + compressed_max, '\0');
+
+    uint32_t orig_size = static_cast<uint32_t>(data.size());
+    std::memcpy(&result[0], &orig_size, sizeof(orig_size));
+
+    uLongf compressed_actual = compressed_max;
+    int ret = compress2(
+        reinterpret_cast<Bytef*>(&result[4]), &compressed_actual,
+        reinterpret_cast<const Bytef*>(data.data()), static_cast<uLong>(data.size()),
+        Z_DEFAULT_COMPRESSION
+    );
+
+    if (ret != Z_OK) {
+        std::cerr << "[ERROR] zlib compression failed: " << ret << std::endl;
+        return data;
+    }
+
+    result.resize(4 + compressed_actual);
+    return result;
+}
+
+std::string LogStore::decompressValue(const std::string& data) const {
+    if (data.size() < 4) {
+        std::cerr << "[ERROR] Compressed data too short to contain size header." << std::endl;
+        return "";
+    }
+
+    uint32_t orig_size = 0;
+    std::memcpy(&orig_size, data.data(), sizeof(orig_size));
+
+    std::string result(orig_size, '\0');
+    uLongf dest_len = static_cast<uLongf>(orig_size);
+
+    int ret = uncompress(
+        reinterpret_cast<Bytef*>(&result[0]), &dest_len,
+        reinterpret_cast<const Bytef*>(data.data() + 4), static_cast<uLong>(data.size() - 4)
+    );
+
+    if (ret != Z_OK) {
+        std::cerr << "[ERROR] zlib decompression failed: " << ret << std::endl;
+        return "";
+    }
+
+    return result;
+}
+
 uint64_t LogStore::append(const std::string& key, const std::string& value) {
     if (!file_.is_open()) return static_cast<uint64_t>(-1);
 
@@ -49,29 +100,32 @@ uint64_t LogStore::append(const std::string& key, const std::string& value) {
     int64_t timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()).count();
 
-    uint32_t key_size = static_cast<uint32_t>(key.size());
-    uint32_t value_size = static_cast<uint32_t>(value.size());
-    
-    // Calculate checksum
+    // Checksum always on uncompressed value
     uint32_t checksum = calculateChecksum(offset, timestamp, key, value);
+
+    uint8_t flags = 0;
+    std::string stored_value = value;
+    if (compression_) {
+        stored_value = compressValue(value);
+        flags = FLAG_COMPRESSED;
+    }
+
+    uint32_t key_size   = static_cast<uint32_t>(key.size());
+    uint32_t value_size = static_cast<uint32_t>(stored_value.size());
 
     file_.seekp(0, std::ios::end);
     std::streampos current_pos = file_.tellp();
 
-    // Write all data
-    file_.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
-    file_.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
-    file_.write(reinterpret_cast<const char*>(&key_size), sizeof(key_size));
+    file_.write(reinterpret_cast<const char*>(&offset),     sizeof(offset));
+    file_.write(reinterpret_cast<const char*>(&timestamp),  sizeof(timestamp));
+    file_.write(reinterpret_cast<const char*>(&flags),      sizeof(flags));
+    file_.write(reinterpret_cast<const char*>(&key_size),   sizeof(key_size));
     if (key_size > 0) file_.write(key.data(), key_size);
-    
     file_.write(reinterpret_cast<const char*>(&value_size), sizeof(value_size));
-    if (value_size > 0) file_.write(value.data(), value_size);
-    
-    file_.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
-    
+    if (value_size > 0) file_.write(stored_value.data(), value_size);
+    file_.write(reinterpret_cast<const char*>(&checksum),   sizeof(checksum));
     file_.flush();
 
-    // Update indexes
     offset_index_[offset] = current_pos;
     key_index_[key].push_back(offset);
     timestamp_index_.insert({timestamp, offset});
@@ -82,31 +136,35 @@ uint64_t LogStore::append(const std::string& key, const std::string& value) {
 
 bool LogStore::replicate(uint64_t offset, int64_t timestamp, const std::string& key, const std::string& value) {
     if (!file_.is_open()) return false;
-    
-    // Ensure strict sequential consistency
+
     if (offset != next_offset_) {
         std::cerr << "[ERROR] Replication offset mismatch. Expected " << next_offset_ << ", got " << offset << std::endl;
         return false;
     }
 
-    uint32_t key_size = static_cast<uint32_t>(key.size());
-    uint32_t value_size = static_cast<uint32_t>(value.size());
-    
     uint32_t checksum = calculateChecksum(offset, timestamp, key, value);
+
+    uint8_t flags = 0;
+    std::string stored_value = value;
+    if (compression_) {
+        stored_value = compressValue(value);
+        flags = FLAG_COMPRESSED;
+    }
+
+    uint32_t key_size   = static_cast<uint32_t>(key.size());
+    uint32_t value_size = static_cast<uint32_t>(stored_value.size());
 
     file_.seekp(0, std::ios::end);
     std::streampos current_pos = file_.tellp();
 
-    file_.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
-    file_.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
-    file_.write(reinterpret_cast<const char*>(&key_size), sizeof(key_size));
+    file_.write(reinterpret_cast<const char*>(&offset),     sizeof(offset));
+    file_.write(reinterpret_cast<const char*>(&timestamp),  sizeof(timestamp));
+    file_.write(reinterpret_cast<const char*>(&flags),      sizeof(flags));
+    file_.write(reinterpret_cast<const char*>(&key_size),   sizeof(key_size));
     if (key_size > 0) file_.write(key.data(), key_size);
-    
     file_.write(reinterpret_cast<const char*>(&value_size), sizeof(value_size));
-    if (value_size > 0) file_.write(value.data(), value_size);
-    
-    file_.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
-    
+    if (value_size > 0) file_.write(stored_value.data(), value_size);
+    file_.write(reinterpret_cast<const char*>(&checksum),   sizeof(checksum));
     file_.flush();
 
     offset_index_[offset] = current_pos;
@@ -124,38 +182,36 @@ std::optional<LogEntry> LogStore::read(uint64_t offset) {
     }
 
     std::streampos pos = it->second;
-    
     file_.clear();
     file_.seekg(pos, std::ios::beg);
 
     LogEntry entry;
-    uint32_t key_size = 0;
+    uint8_t  flags      = 0;
+    uint32_t key_size   = 0;
     uint32_t value_size = 0;
 
-    file_.read(reinterpret_cast<char*>(&entry.offset), sizeof(entry.offset));
+    file_.read(reinterpret_cast<char*>(&entry.offset),    sizeof(entry.offset));
     file_.read(reinterpret_cast<char*>(&entry.timestamp), sizeof(entry.timestamp));
-    
-    file_.read(reinterpret_cast<char*>(&key_size), sizeof(key_size));
+    file_.read(reinterpret_cast<char*>(&flags),           sizeof(flags));
+    file_.read(reinterpret_cast<char*>(&key_size),        sizeof(key_size));
     if (key_size > 0) {
         entry.key.resize(key_size);
         file_.read(&entry.key[0], key_size);
     }
-
     file_.read(reinterpret_cast<char*>(&value_size), sizeof(value_size));
     if (value_size > 0) {
         entry.value.resize(value_size);
         file_.read(&entry.value[0], value_size);
     }
-    
     file_.read(reinterpret_cast<char*>(&entry.checksum), sizeof(entry.checksum));
 
     if (file_.fail() || entry.offset != offset) {
         return std::nullopt;
     }
-    
-    // Optional: Validate checksum on read to protect against bit-rot
-    // uint32_t expected_checksum = calculateChecksum(entry.offset, entry.timestamp, entry.key, entry.value);
-    // if (entry.checksum != expected_checksum) return std::nullopt;
+
+    if (flags & FLAG_COMPRESSED) {
+        entry.value = decompressValue(entry.value);
+    }
 
     return entry;
 }
@@ -200,34 +256,34 @@ void LogStore::recover() {
     while (true) {
         std::streampos current_pos = file_.tellg();
         
-        uint64_t offset;
-        int64_t timestamp;
-        uint32_t key_size;
-        uint32_t value_size;
-        uint32_t checksum;
+        uint64_t offset    = 0;
+        int64_t  timestamp = 0;
+        uint32_t key_size   = 0;
+        uint32_t value_size = 0;
+        uint32_t checksum   = 0;
+        uint8_t  flags      = 0;
 
         if (!file_.read(reinterpret_cast<char*>(&offset), sizeof(offset))) {
             break; // EOF gracefully reached
         }
-        
         file_.read(reinterpret_cast<char*>(&timestamp), sizeof(timestamp));
-        file_.read(reinterpret_cast<char*>(&key_size), sizeof(key_size));
-        
+        file_.read(reinterpret_cast<char*>(&flags),     sizeof(flags));
+        file_.read(reinterpret_cast<char*>(&key_size),  sizeof(key_size));
+
         std::string key;
         if (key_size > 0 && !file_.fail()) {
             key.resize(key_size);
             file_.read(&key[0], key_size);
         }
-        
+
         file_.read(reinterpret_cast<char*>(&value_size), sizeof(value_size));
-        
-        // We MUST read the value now to verify the checksum
-        std::string value;
+
+        std::string stored_value;
         if (value_size > 0 && !file_.fail()) {
-            value.resize(value_size);
-            file_.read(&value[0], value_size);
+            stored_value.resize(value_size);
+            file_.read(&stored_value[0], value_size);
         }
-        
+
         file_.read(reinterpret_cast<char*>(&checksum), sizeof(checksum));
 
         // 1. Partial Write Check
@@ -236,9 +292,14 @@ void LogStore::recover() {
             needs_truncation = true;
             break;
         }
-        
-        // 2. Corrupted Data Check
-        uint32_t expected_checksum = calculateChecksum(offset, timestamp, key, value);
+
+        // 2. Decompress value for checksum verification
+        std::string plain_value = (flags & FLAG_COMPRESSED)
+            ? decompressValue(stored_value)
+            : stored_value;
+
+        // 3. Corrupted Data Check
+        uint32_t expected_checksum = calculateChecksum(offset, timestamp, key, plain_value);
         if (checksum != expected_checksum) {
             std::cout << "[WARNING] Corrupt entry detected (offset: " << offset << ")! Halting scan." << std::endl;
             needs_truncation = true;
@@ -306,15 +367,25 @@ void LogStore::compact() {
         uint64_t new_offset = 0;
         for (auto& e : entries) {
             e.offset = new_offset++;
-            uint32_t ksz = static_cast<uint32_t>(e.key.size());
-            uint32_t vsz = static_cast<uint32_t>(e.value.size());
+            // Checksum on uncompressed value (entries from read() are always plain)
             uint32_t chk = calculateChecksum(e.offset, e.timestamp, e.key, e.value);
+
+            uint8_t flags = 0;
+            std::string stored_value = e.value;
+            if (compression_) {
+                stored_value = compressValue(e.value);
+                flags = FLAG_COMPRESSED;
+            }
+
+            uint32_t ksz = static_cast<uint32_t>(e.key.size());
+            uint32_t vsz = static_cast<uint32_t>(stored_value.size());
             temp.write(reinterpret_cast<const char*>(&e.offset),    sizeof(e.offset));
             temp.write(reinterpret_cast<const char*>(&e.timestamp), sizeof(e.timestamp));
+            temp.write(reinterpret_cast<const char*>(&flags),       sizeof(flags));
             temp.write(reinterpret_cast<const char*>(&ksz),         sizeof(ksz));
             if (ksz > 0) temp.write(e.key.data(), ksz);
             temp.write(reinterpret_cast<const char*>(&vsz),         sizeof(vsz));
-            if (vsz > 0) temp.write(e.value.data(), vsz);
+            if (vsz > 0) temp.write(stored_value.data(), vsz);
             temp.write(reinterpret_cast<const char*>(&chk),         sizeof(chk));
         }
         temp.flush();

@@ -178,3 +178,62 @@ else
     echo "  OVERALL: ONE OR MORE CHECKS FAILED"
 fi
 echo ""
+
+# =========================================================================== #
+# 10. Compression comparison
+# =========================================================================== #
+
+# Stop remaining servers from the main test
+[ -n "$LEADER_PID" ] && kill "$LEADER_PID" 2>/dev/null; LEADER_PID=""
+[ -n "$F2_PID" ]     && kill "$F2_PID"     2>/dev/null; F2_PID=""
+wait 2>/dev/null; sleep 0.3
+
+echo "################################################################"
+echo "#  COMPRESSION COMPARISON"
+echo "################################################################"
+echo ""
+
+# --- 10a: Without compression ---
+echo "==> [10a] Without compression..."
+rm -rf data/leader data/follower1 data/follower2
+./logforge_server --role=follower --port=5002 --data=./data/follower1 > /dev/null 2>&1 &
+CMP_F1=$!
+./logforge_server --role=follower --port=5003 --data=./data/follower2 > /dev/null 2>&1 &
+CMP_F2=$!
+./logforge_server --role=leader --port=5001 --data=./data/leader \
+    --peers=localhost:5002,localhost:5003 > /dev/null 2>&1 &
+CMP_L=$!
+sleep 1
+./logforge_client --target=localhost:5001 > /dev/null 2>&1
+NO_COMPRESS_SIZE=$(wc -c < data/leader/server_log.bin 2>/dev/null | tr -d ' ')
+kill $CMP_F1 $CMP_F2 $CMP_L 2>/dev/null
+wait $CMP_F1 $CMP_F2 $CMP_L 2>/dev/null
+echo "    Done. Leader log: ${NO_COMPRESS_SIZE} bytes"
+sleep 0.3
+
+# --- 10b: With compression ---
+echo "==> [10b] With compression (--compression=true)..."
+rm -rf data/leader data/follower1 data/follower2
+./logforge_server --role=follower --port=5002 --data=./data/follower1 --compression=true > /dev/null 2>&1 &
+CMP_F1=$!
+./logforge_server --role=follower --port=5003 --data=./data/follower2 --compression=true > /dev/null 2>&1 &
+CMP_F2=$!
+./logforge_server --role=leader --port=5001 --data=./data/leader \
+    --peers=localhost:5002,localhost:5003 --compression=true > /dev/null 2>&1 &
+CMP_L=$!
+sleep 1
+./logforge_client --target=localhost:5001 > /dev/null 2>&1
+COMPRESS_SIZE=$(wc -c < data/leader/server_log.bin 2>/dev/null | tr -d ' ')
+kill $CMP_F1 $CMP_F2 $CMP_L 2>/dev/null
+wait $CMP_F1 $CMP_F2 $CMP_L 2>/dev/null
+echo "    Done. Leader log: ${COMPRESS_SIZE} bytes"
+echo ""
+
+echo "--- Results ---"
+echo "  Uncompressed log : ${NO_COMPRESS_SIZE} bytes"
+echo "  Compressed log   : ${COMPRESS_SIZE} bytes"
+if [ "${NO_COMPRESS_SIZE:-0}" -gt 0 ] && [ "${COMPRESS_SIZE:-0}" -gt 0 ]; then
+    SAVINGS=$(( (NO_COMPRESS_SIZE - COMPRESS_SIZE) * 100 / NO_COMPRESS_SIZE ))
+    echo "  Space saved      : ${SAVINGS}%"
+fi
+echo ""

@@ -155,13 +155,14 @@ int main(int argc, char** argv) {
     client.SearchByTimestampRange(t1, t2);
 
     std::cout << "\n--- Compaction Demo ---" << std::endl;
-    std::cout << "Appending entries with repeated keys..." << std::endl;
-    client.AppendLog("config", "v1");
-    client.AppendLog("config", "v2");
-    client.AppendLog("config", "v3");
-    client.AppendLog("user",   "alice");
-    client.AppendLog("user",   "bob");
-    client.AppendLog("user",   "charlie");
+    std::cout << "Appending entries with repeated keys (large values)..." << std::endl;
+    const std::string pad(300, 'x');
+    client.AppendLog("config", "{\"version\":1,\"payload\":\"" + pad + "\"}");
+    client.AppendLog("config", "{\"version\":2,\"payload\":\"" + pad + "\"}");
+    client.AppendLog("config", "{\"version\":3,\"payload\":\"" + pad + "\"}");
+    client.AppendLog("user",   "{\"name\":\"alice\",\"data\":\"" + pad + "\"}");
+    client.AppendLog("user",   "{\"name\":\"bob\",\"data\":\"" + pad + "\"}");
+    client.AppendLog("user",   "{\"name\":\"charlie\",\"data\":\"" + pad + "\"}");
 
     std::cout << "\n--- Before Compaction ---" << std::endl;
     client.SearchByKey("config");

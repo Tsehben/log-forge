@@ -4,6 +4,7 @@
 #include <vector>
 #include <sstream>
 #include <filesystem>
+#include <cstdlib>
 
 #include <grpcpp/grpcpp.h>
 #include "logforge.grpc.pb.h"
@@ -36,8 +37,9 @@ class LogForgeServiceImpl final : public LogForgeService::Service {
     std::vector<std::pair<std::string, std::unique_ptr<LogForgeService::Stub>>> followers_;
 
 public:
-    LogForgeServiceImpl(const std::string& filepath, const std::string& role, const std::vector<std::string>& peers)
-        : store_(filepath), role_(role) {
+    LogForgeServiceImpl(const std::string& filepath, const std::string& role,
+                        const std::vector<std::string>& peers, bool compression)
+        : store_(filepath, compression), role_(role) {
         if (role_ == "leader") {
             for (const auto& peer : peers) {
                 if (!peer.empty()) {
@@ -199,6 +201,12 @@ int main(int argc, char** argv) {
     std::string port = "50051";
     std::string data_dir = "./data/leader";
     std::vector<std::string> peers;
+    bool compression = false;
+
+    const char* env_compress = std::getenv("LOGFORGE_COMPRESSION");
+    if (env_compress && (std::string(env_compress) == "true" || std::string(env_compress) == "1")) {
+        compression = true;
+    }
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -215,6 +223,8 @@ int main(int argc, char** argv) {
             while (std::getline(ss, peer, ',')) {
                 peers.push_back(peer);
             }
+        } else if (arg == "--compression=true" || arg == "--compression=1") {
+            compression = true;
         }
     }
 
@@ -228,14 +238,16 @@ int main(int argc, char** argv) {
     std::string filepath = data_dir + "/server_log.bin";
     std::string server_address = "0.0.0.0:" + port;
 
-    LogForgeServiceImpl service(filepath, role, peers);
+    LogForgeServiceImpl service(filepath, role, peers, compression);
 
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
     
     std::unique_ptr<Server> server(builder.BuildAndStart());
-    std::cout << "[LogForge " << role << "] Server listening on " << server_address << " | Data: " << filepath << std::endl;
+    std::cout << "[LogForge " << role << "] Server listening on " << server_address
+              << " | Data: " << filepath
+              << " | Compression: " << (compression ? "on" : "off") << std::endl;
     server->Wait();
 
     return 0;
