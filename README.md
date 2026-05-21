@@ -8,32 +8,8 @@ A C++ distributed append-only log storage engine with a gRPC API, leader/followe
 
 ## Architecture
 
-```
-  +-----------+      gRPC: AppendLog, GetLog, SearchByKey,
-  |  Client   | -->  SearchByTimestampRange, CompactLog
-  +-----------+
-        |
-        v
-  +--------------------------------------------------+
-  |             Leader  (port 5001)                  |
-  |  +--------------------------------------------+  |
-  |  |  LogStore                                  |  |
-  |  |  - append-only binary log on disk          |  |
-  |  |  - offset_index | key_index | ts_index     |  |
-  |  |  - FNV-1a checksum per entry               |  |
-  |  |  - optional zlib compression               |  |
-  |  |  - crash recovery on open                  |  |
-  |  +--------------------------------------------+  |
-  |        |  ReplicateLog RPC        |              |
-  |        v                          v              |
-  |  +---------------+   +----------------+         |
-  |  | Follower 1    |   | Follower 2     |         |
-  |  | port 5002     |   | port 5003      |         |
-  |  | LogStore      |   | LogStore       |         |
-  |  +---------------+   +----------------+         |
-  +--------------------------------------------------+
-         All nodes run in Docker Compose
-```
+<img width="1536" height="1024" alt="design_image" src="https://github.com/user-attachments/assets/9d76014f-2d3c-4637-a275-17d0dc59d4f9" />
+
 
 ---
 
