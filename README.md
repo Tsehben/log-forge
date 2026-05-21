@@ -99,10 +99,33 @@ cmake --build build
 ./build/logforge_client --target=localhost:5001
 ```
 
+### Unit Tests (GoogleTest)
+
+GoogleTest is fetched automatically by CMake the first time you configure — no manual install needed.
+
+```bash
+cmake -B build
+cmake --build build --target logstore_tests
+ctest --test-dir build --output-on-failure
+```
+
+The test suite covers:
+- Append + read (single and multi-entry)
+- Missing offset returns `nullopt`
+- Key index (present and absent keys)
+- Timestamp range search with inclusive bounds
+- Recovery after reopen (data and indexes rebuild, next offset resumes)
+- Corrupted trailing bytes are truncated; prior valid entries survive
+- Compaction keeps only the latest value per key, reassigns offsets sequentially, survives reopen
+- Compression round-trip (enabled and disabled)
+- Compressed files are smaller on disk than uncompressed
+- Compression survives recovery after reopen
+- Compaction preserves correct values when compression is enabled
+
 ### Automated replication verification
 
 ```bash
 ./run_test.sh
 ```
 
-Starts a clean 3-node cluster, runs two client rounds (one with both followers up, one with follower1 killed), and prints PASS/FAIL for 2/2 and 1/2 replication acknowledgments.
+Starts a clean 3-node cluster, runs two client rounds (one with both followers up, one with follower1 killed), prints PASS/FAIL for replication acknowledgments, and finishes with a compression comparison showing byte savings.

@@ -67,3 +67,22 @@ target_link_libraries(logforge_client logforge_proto)
 # Keeping the local interactive tool from Part 3
 add_executable(logforge_local main.cpp)
 target_link_libraries(logforge_local logstore)
+
+# ---- Unit Tests (GoogleTest) ------------------------------------------------
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(BUILD_GMOCK   OFF CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+include(GoogleTest)
+
+add_executable(logstore_tests tests/logstore_test.cpp)
+target_link_libraries(logstore_tests PRIVATE logstore GTest::gtest_main)
+target_include_directories(logstore_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+gtest_discover_tests(logstore_tests)
