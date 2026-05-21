@@ -122,6 +122,41 @@ The test suite covers:
 - Compression survives recovery after reopen
 - Compaction preserves correct values when compression is enabled
 
+### Benchmarks
+
+```bash
+cmake --build build --target logforge_benchmark
+
+# Default: 100k entries, 256B values, compression off
+./build/logforge_benchmark
+
+# With compression enabled
+./build/logforge_benchmark --compression=true
+
+# Custom entry count and value size
+./build/logforge_benchmark --entries=500000 --value-size=512
+```
+
+Sample results on Apple M2 (100k entries, 256B values):
+
+```
+Compression OFF
+  Throughput                               259,862  entries/sec
+  Avg append latency                          3.73  us/entry
+  p95 append latency                          5.54  us/entry
+  Avg read latency                            1.18  us/entry
+  Compaction (100k → 10 entries)              7.06  ms
+  File size on disk                       28,320    KB
+
+Compression ON
+  Throughput                               132,973  entries/sec
+  Avg append latency                          7.41  us/entry
+  p95 append latency                          9.33  us/entry
+  Avg read latency                            1.63  us/entry
+  Compaction (100k → 10 entries)              3.84  ms
+  File size on disk                        4,882    KB  (82.8% smaller)
+```
+
 ### Automated replication verification
 
 ```bash

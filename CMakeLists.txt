@@ -68,6 +68,11 @@ target_link_libraries(logforge_client logforge_proto)
 add_executable(logforge_local main.cpp)
 target_link_libraries(logforge_local logstore)
 
+# The Benchmark Executable
+add_executable(logforge_benchmark benchmarks/logforge_benchmark.cpp)
+target_link_libraries(logforge_benchmark PRIVATE logstore)
+target_include_directories(logforge_benchmark PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 # ---- Unit Tests (GoogleTest) ------------------------------------------------
 include(FetchContent)
 FetchContent_Declare(
