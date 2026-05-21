@@ -280,7 +280,3 @@ LogForge/
 - **TLS + authentication** — add mTLS and token-based auth to the gRPC layer
 
 ---
-
-## Resume Bullet
-
-> **LogForge** — Built a distributed append-only log storage engine in C++ with a gRPC/Protobuf API, FNV-1a checksum crash recovery, leader/follower replication with 2-of-3 fault tolerance, key-based log compaction, and optional zlib compression (82.8% space reduction); achieved **145k writes/sec at 6.77 µs avg latency** on 100k entries; verified with 25 GoogleTest unit tests and a custom benchmark suite deployed via Docker Compose.
